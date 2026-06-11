@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Vazirmatn", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom RTL-friendly animations and transitions */
+.rtl-grid {
+  direction: rtl;
+}
+
+.html-content p {
+  margin-bottom: 0.85rem;
+  line-height: 1.8;
+  color: #334155;
+  text-align: justify;
+}
+.html-content h2, .html-content h3, .html-content h4 {
+  font-weight: 800;
+  color: #0f172a;
+  margin-top: 1.25rem;
+  margin-bottom: 0.65rem;
+}
+.html-content h2 { 
+  font-size: 1.15rem; 
+  border-right: 3px solid #4f46e5; 
+  padding-right: 0.5rem; 
+}
+.html-content h3 { 
+  font-size: 1rem; 
+}
+.html-content h4 { 
+  font-size: 0.875rem; 
+}
+.html-content ul, .html-content ol {
+  list-style-type: disc;
+  margin-right: 1.25rem;
+  margin-bottom: 0.85rem;
+}
+.html-content li {
+  margin-bottom: 0.25rem;
+  color: #475569;
+}
+.html-content strong {
+  font-weight: 700;
+  color: #1e1b4b;
+}
+
+.html-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.75rem;
+  text-align: right;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.html-content th, .html-content td {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #e2e8f0;
+}
+
+.html-content th {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.html-content tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+
+.html-content tr:hover {
+  background-color: #f1f5f9/50;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: #0f172a;
+}

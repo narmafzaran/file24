@@ -1,0 +1,6 @@
+{
+  "name": "File Store - پلتفرم فروش فایل",
+  "description": "پلتفرم جامع فروش و دانلود فایل به همراه پنل مدیریت محصولات، گزارشات دانلود و درگاه پرداخت شبیه‌سازی شده",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
