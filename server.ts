@@ -745,6 +745,60 @@ async function startServer() {
     });
   });
 
+  // Dynamic public XML sitemap for SEO crawlers and indexers (GSC)
+  app.get("/sitemap.xml", (req, res) => {
+    try {
+      const db = readDB();
+      const host = `${req.protocol}://${req.get("host")}`;
+      const urls: string[] = [];
+
+      // 1. Primary Homepage indexation
+      urls.push(`  <url>
+    <loc>${host}/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>`);
+
+      // 2. Active Categories indices
+      if (db.categories && Array.isArray(db.categories)) {
+        db.categories.forEach((cat: any) => {
+          if (cat.slug) {
+            urls.push(`  <url>
+    <loc>${host}/${cat.slug}</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>`);
+          }
+        });
+      }
+
+      // 3. Products/Files details pages indices
+      if (db.products && Array.isArray(db.products)) {
+        db.products.forEach((prod: any) => {
+          const productSlug = prod.slug || prod.id;
+          if (productSlug) {
+            urls.push(`  <url>
+    <loc>${host}/p/${productSlug}</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>`);
+          }
+        });
+      }
+
+      const sitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join("\n")}
+</urlset>`;
+
+      res.header("Content-Type", "application/xml; charset=utf-8");
+      res.status(200).send(sitemapXml);
+    } catch (err: any) {
+      console.error("[Sitemap Generation Exception] Error payload:", err);
+      res.status(500).send("خطا در تولید نقشه سایت پویا");
+    }
+  });
+
   // API - Get Admin App Settings (Admin Only)
   app.get("/api/admin/settings", requireAdminAuth, (req, res) => {
     const db = readDB();
@@ -979,19 +1033,331 @@ ${categoriesJson}
     }
   });
 
+  // Helpers for SEO & Server-Side Pre-Rendering (Option 1)
+  const isStaticFile = (urlPath: string) => {
+    const p = urlPath.toLowerCase();
+    return p.includes(".") || 
+           p.startsWith("/assets/") || 
+           p.includes("/@") || 
+           p.startsWith("/src/") ||
+           p.startsWith("/node_modules/");
+  };
+
+  const serveSEOPage = async (req: express.Request, res: express.Response, viteInstance?: any) => {
+    try {
+      const db = readDB();
+      const settings = db.settings || {
+        siteTitle: "فروشگاه بزرگ فایل دیجیتال",
+        faviconUrl: "/favicon.ico",
+        headerScript: ""
+      };
+      
+      const siteTitle = settings.siteTitle || "فروشگاه بزرگ فایل دیجیتال";
+      const faviconUrl = settings.faviconUrl || "/favicon.ico";
+      const headerScript = settings.headerScript || "";
+
+      let rawHtml = "";
+      if (process.env.NODE_ENV !== "production" && viteInstance) {
+        const indexPath = path.join(process.cwd(), "index.html");
+        rawHtml = fs.readFileSync(indexPath, "utf-8");
+        rawHtml = await viteInstance.transformIndexHtml(req.originalUrl, rawHtml);
+      } else {
+        const indexPath = path.join(process.cwd(), "dist", "index.html");
+        rawHtml = fs.readFileSync(indexPath, "utf-8");
+      }
+
+      let reqPath = "";
+      try {
+        reqPath = decodeURIComponent(req.path).replace(/^\/+/g, "");
+      } catch (e) {
+        reqPath = req.path.replace(/^\/+/g, "");
+      }
+
+      let pageTitle = `${siteTitle} | پورتال فروش فایل، کتاب، فیلم و کدهای کاربردی`;
+      let metaDescription = "بستر مستقیم و تضمین شده پرداخت امن شبیه‌سازی شده و تحویل سریع و دانلود آنی انواع فایل، پروژه، تمپلیت عاری از هرگونه بدافزار.";
+      let keywords = "فروشگاه فایل, دانلود قالب, پروژه دانشجویی, خرید پروژه, دانلود کتاب رونق, آموزش ویدئویی";
+      let ogTags = "";
+      let jsonLd = "";
+      let seoContent = "";
+
+      // Route matching logic
+      let matchedProduct = null;
+      let productSlug = "none";
+
+      if (reqPath.startsWith("product/")) {
+        productSlug = reqPath.substring("product/".length);
+      } else if (reqPath.startsWith("p/")) {
+        productSlug = reqPath.substring("p/".length);
+      } else if (reqPath) {
+        // Direct matching slug or ID
+        const exists = db.products.find((p: any) => p.slug === reqPath || p.id === reqPath);
+        if (exists) {
+          productSlug = reqPath;
+        }
+      }
+
+      if (productSlug !== "none" && db.products && db.products.length > 0) {
+        matchedProduct = db.products.find((p: any) => p.slug === productSlug || p.id === productSlug);
+      }
+
+      if (matchedProduct) {
+        const p = matchedProduct;
+        const plainDesc = (p.description || "خرید و دانلود فوری فایل دیجیتال عاری از بدافزار")
+          .replace(/<[^>]*>/g, " ")
+          .substring(0, 160)
+          .trim() + "...";
+
+        pageTitle = `${p.title} | خرید و دانلود مستقیم | ${siteTitle}`;
+        metaDescription = plainDesc;
+        keywords = `${p.title}, خرید ${p.title}, دانلود منبع ${p.title}, فایل ${p.category}`;
+        
+        ogTags = `
+          <meta property="og:title" content="${p.title} | ${siteTitle}" />
+          <meta property="og:description" content="${plainDesc}" />
+          <meta property="og:type" content="product" />
+          <meta property="og:image" content="${p.coverUrl || faviconUrl}" />
+          <meta property="product:price:amount" content="${p.price}" />
+          <meta property="product:price:currency" content="IRT" />
+        `;
+
+        const productSchema = {
+          "@context": "https://schema.org",
+          "@type": "Product",
+          "name": p.title,
+          "description": plainDesc,
+          "image": p.coverUrl || undefined,
+          "offers": {
+            "@type": "Offer",
+            "price": p.price,
+            "priceCurrency": "IRR",
+            "availability": "https://schema.org/InStock",
+            "seller": {
+              "@type": "Organization",
+              "name": siteTitle
+            }
+          }
+        };
+        jsonLd = `<script type="application/ld+json">${JSON.stringify(productSchema)}</script>`;
+
+        seoContent = `
+          <article>
+            <header>
+              <h1>${p.title}</h1>
+              <p>شناسه کالا: <code>${p.id}</code></p>
+              <p>دسته‌بندی اصلی: <strong>${p.category}</strong></p>
+              <p>قیمت فایل سرور: <strong>${p.price.toLocaleString("fa-IR")} تومان</strong></p>
+            </header>
+            <hr />
+            <section class="description">
+              <h2>توضیحات کلی و مشخصات تکمیلی فایل</h2>
+              <div>${p.description}</div>
+            </section>
+            <hr />
+            <footer>
+              <p>توضیحات امنیتی: تمامی محتوی ارائه شده در سرور ${siteTitle} دارای ضریب اطمینان کامل بوده، عاری از بدافزار و بلافاصله پس از پرداخت به صورت شبیه‌سازی آماده دانلود پرسرعت است.</p>
+            </footer>
+          </article>
+        `;
+      } 
+      else if (reqPath && db.categories && db.categories.find((c: any) => c.slug === reqPath)) {
+        const cat = db.categories.find((c: any) => c.slug === reqPath);
+        const catProducts = db.products.filter((p: any) => p.category === cat.id);
+
+        pageTitle = `بایگانی دانلود و خرید محصولات ${cat.label} | ${siteTitle}`;
+        metaDescription = `بزرگترین مرجع دانلود کاتالوگ محصولات ${cat.label}. بیش از ${catProducts.length} سورس‌کد، فایل و پکیج معتبرِ آماده دانلود آنی در پلتفرم ${siteTitle}.`;
+        keywords = `${cat.label}, دسته‌بندی ${cat.label}, دانلود ${cat.label}, مرجع محصولات دسته‌بندی شده`;
+
+        ogTags = `
+          <meta property="og:title" content="شاخه ${cat.label} | ${siteTitle}" />
+          <meta property="og:description" content="${metaDescription}" />
+          <meta property="og:type" content="website" />
+        `;
+
+        const breadcrumbSchema = {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "صفحه نخست اصلی",
+              "item": `${req.protocol}://${req.get("host")}/`
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": cat.label,
+              "item": `${req.protocol}://${req.get("host")}/${cat.slug}`
+            }
+          ]
+        };
+        jsonLd = `<script type="application/ld+json">${JSON.stringify(breadcrumbSchema)}</script>`;
+
+        seoContent = `
+          <section>
+            <h1>آرشیو فایل‌های مهارتی "${cat.label}"</h1>
+            <p>تعداد ${catProducts.length} محصول شاخص در طبقه "${cat.label}" آماده دانلود فوری است:</p>
+            <ol>
+              ${catProducts.map((p: any) => `
+                <li>
+                  <a href="/p/${p.slug}">
+                    <strong>${p.title}</strong>
+                    <span> - قیمت: ${p.price.toLocaleString("fa-IR")} تومان</span>
+                  </a>
+                </li>
+              `).join("")}
+            </ol>
+          </section>
+        `;
+      }
+      else {
+        const websiteSchema = {
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          "name": siteTitle,
+          "url": `${req.protocol}://${req.get("host")}/`,
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": `${req.protocol}://${req.get("host")}/?search={search_term_string}`
+            },
+            "query-input": "required name=search_term_string"
+          }
+        };
+        jsonLd = `<script type="application/ld+json">${JSON.stringify(websiteSchema)}</script>`;
+
+        seoContent = `
+          <main>
+            <header>
+              <h1>${siteTitle} | دانلود و بارگیری مستقیم فایل</h1>
+              <p>مجموعه‌ای کامل از انواع فریم‌ورک‌ها، اسکریپت‌ها، قالب‌های حرفه‌ای، دوره‌های ویدیویی، کدهای تمیز و سورس‌های آماده دانلود با لایسنس دائمی</p>
+            </header>
+            
+            <section class="categories">
+              <h2>شاخه‌های فعال کاتالوگ فرانتسی</h2>
+              <ul>
+                ${(db.categories || []).map((c: any) => `
+                  <li><a href="/${c.slug}">${c.label}</a></li>
+                `).join("")}
+              </ul>
+            </section>
+
+            <section class="latest-products">
+              <h2>جدیدترین فایل‌های آپلود شده به مخزن بزرگ</h2>
+              <ul>
+                ${(db.products || []).slice(0, 20).map((p: any) => `
+                  <li>
+                    <a href="/p/${p.slug || p.id}">
+                      <strong>${p.title}</strong>
+                      <span> - قیمت مصرف‌کننده: ${p.price.toLocaleString("fa-IR")} تومان</span>
+                    </a>
+                  </li>
+                `).join("")}
+              </ul>
+            </section>
+          </main>
+        `;
+      }
+
+      // Perform placeholders injection
+      let html = rawHtml;
+
+      // Favicon tag injection
+      const faviconTag = `<link rel="icon" href="${faviconUrl}" />`;
+      if (html.includes('<link rel="icon"')) {
+        html = html.replace(/<link rel="icon"[^>]*>/g, faviconTag);
+      } else if (html.includes('<link rel="shortcut icon"')) {
+        html = html.replace(/<link rel="shortcut icon"[^>]*>/g, faviconTag);
+      } else {
+        html = html.replace('</head>', `  ${faviconTag}\n</head>`);
+      }
+
+      // Page Title replace
+      if (html.includes('<title>')) {
+        html = html.replace(/<title>.*?<\/title>/g, `<title>${pageTitle}</title>`);
+      } else {
+        html = html.replace('</head>', `  <title>${pageTitle}</title>\n</head>`);
+      }
+
+      // MetaTags, Social OpenGraph tags, schemas, and Google Custom Headers Script tags injection
+      const metaTagsString = `
+        <meta name="description" content="${metaDescription}" />
+        <meta name="keywords" content="${keywords}" />
+        <meta name="robots" content="index, follow" />
+        <meta property="og:title" content="${pageTitle}" />
+        <meta property="og:description" content="${metaDescription}" />
+        <meta property="og:type" content="website" />
+        <meta property="og:image" content="${faviconUrl}" />
+        ${ogTags}
+        ${jsonLd}
+        ${headerScript}
+      `;
+      html = html.replace('</head>', `  ${metaTagsString}\n</head>`);
+
+      // SEO Crawl-ready content injection inside <body> for google/bing crawler bots
+      const renderContainer = `
+        <div id="seo-pre-render" style="display: none !important; width: 0; height: 0; overflow: hidden; opacity: 0; pointer-events: none;">
+          ${seoContent}
+        </div>
+      `;
+      html = html.replace('<div id="root"></div>', `<div id="root"></div>\n${renderContainer}`);
+
+      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+
+    } catch (err: any) {
+      console.error("[SEO Pre-renderer Exception] Failed gracefully:", err);
+      try {
+        const file = (process.env.NODE_ENV !== "production") 
+          ? path.join(process.cwd(), "index.html")
+          : path.join(process.cwd(), "dist", "index.html");
+        res.sendFile(file);
+      } catch (fallbackError) {
+        res.status(500).send("سایت در حال بروزرسانی و بازنشانی است. لطفاً مکرراً تلاش فرمایید.");
+      }
+    }
+  };
+
   // Vite integration
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
+
+    // Custom router interceptor for beautiful dynamic SEO Pre-rendering in dev mode
+    app.get("*", async (req, res, next) => {
+      if (isStaticFile(req.path) || req.path.startsWith("/api/")) {
+        return next();
+      }
+      try {
+        await serveSEOPage(req, res, vite);
+      } catch (err) {
+        next(err);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    
+    // Serve static files (except raw index.html, which is dynamically fed with SEO values by serveSEOPage)
+    app.use(express.static(distPath, { index: false }));
+
+    // Custom router interceptor for SEO pre-rendering in production
+    app.get("*", async (req, res, next) => {
+      if (isStaticFile(req.path) || req.path.startsWith("/api/")) {
+        return next();
+      }
+      try {
+        await serveSEOPage(req, res);
+      } catch (err) {
+        next(err);
+      }
     });
+
+    // Fallback static files serving
+    app.use(express.static(distPath));
   }
 
   app.listen(PORT, "0.0.0.0", () => {
